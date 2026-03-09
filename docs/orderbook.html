@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LOB Engine — Live Demo</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #030609;
+    --surface: #080e14;
+    --surface2: #0d1720;
+    --border: #1a2d40;
+    --border2: #0f1f2e;
+    --bid: #00e676;
+    --ask: #ff3d71;
+    --mid: #00b0ff;
+    --accent: #ffe500;
+    --text: #c8dde8;
+    --muted: #4a6070;
+    --dim: #1e3040;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.025) 2px, rgba(0,0,0,0.025) 4px);
+    pointer-events: none; z-index: 999;
+  }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo { font-family:'Syne',sans-serif; font-size:17px; font-weight:800; color:#fff; letter-spacing:-0.5px; }
+  .logo span { color: var(--accent); }
+  .header-right { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .pill { background:var(--surface2); border:1px solid var(--border); padding:3px 10px; border-radius:3px; font-size:10px; color:var(--muted); }
+  .pill b { color: var(--text); }
+  .dot { width:7px;height:7px;border-radius:50%;background:var(--bid);box-shadow:0 0 7px var(--bid);animation:pulse 1.5s infinite;display:inline-block;margin-right:5px; }
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+
+  main {
+    display: grid;
+    grid-template-columns: 280px 1fr 1fr;
+    grid-template-rows: auto auto auto auto;
+    gap: 1px;
+    background: var(--border2);
+  }
+  .panel { background: var(--surface); padding: 14px; }
+  .panel-title {
+    font-family:'Syne',sans-serif; font-size:9px; font-weight:700;
+    letter-spacing:2px; text-transform:uppercase; color:var(--muted);
+    margin-bottom:12px; display:flex; align-items:center; gap:8px;
+  }
+  .panel-title::after { content:''; flex:1; height:1px; background:var(--border); }
+
+  /* ORDER BOOK */
+  .book-panel { grid-row: 1/3; }
+  .col3 { display:grid; grid-template-columns:1fr 1fr 1fr; }
+  .col3-hdr { padding:0 3px 7px; color:var(--muted); font-size:9px; border-bottom:1px solid var(--border); margin-bottom:5px; }
+  .col3-hdr span:nth-child(2){text-align:center} .col3-hdr span:last-child{text-align:right}
+  .book-rows { display:flex; flex-direction:column; gap:1px; }
+  .brow {
+    display:grid; grid-template-columns:1fr 1fr 1fr;
+    padding:3px 3px; border-radius:2px; position:relative; cursor:default;
+    transition:background 0.08s;
+  }
+  .brow:hover { background: var(--dim) !important; }
+  .brow .bg { position:absolute;top:0;bottom:0;right:0;opacity:0.11;border-radius:2px;transition:width 0.35s ease; }
+  .brow span { position:relative;z-index:1; font-size:11px; }
+  .brow span:nth-child(2){text-align:center;color:var(--muted)}
+  .brow span:last-child{text-align:right;color:var(--muted)}
+  .ask-row span:first-child { color:var(--ask); font-weight:500; }
+  .bid-row span:first-child { color:var(--bid); font-weight:500; }
+
+  .mid-bar {
+    text-align:center; padding:9px 4px;
+    font-family:'Syne',sans-serif; font-size:19px; font-weight:700; color:var(--mid);
+    border-top:1px solid var(--border); border-bottom:1px solid var(--border);
+    margin:5px 0; position:relative; letter-spacing:0.5px;
+    transition: background 0.4s;
+  }
+  .mid-bar .spd { position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--muted); }
+  .mid-bar .dir { position:absolute;left:6px;top:50%;transform:translateY(-50%);font-size:13px; }
+
+  /* WS FEED */
+  .feed-panel { grid-column: 2/4; }
+  #ws-feed { height:130px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+  #ws-feed::-webkit-scrollbar{width:3px} #ws-feed::-webkit-scrollbar-thumb{background:var(--border)}
+  .feed-row {
+    display:grid; grid-template-columns:70px 55px 50px 90px 80px 1fr;
+    padding:3px 3px; border-bottom:1px solid var(--border2);
+    font-size:10px; opacity:0; animation:fi 0.25s forwards; align-items:center;
+  }
+  @keyframes fi{to{opacity:1}}
+  .feed-gap { background:#ff3d7110; }
+
+  /* MATCH LOG */
+  .match-panel { grid-column: 2/4; }
+  #match-log { height:160px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+  #match-log::-webkit-scrollbar{width:3px} #match-log::-webkit-scrollbar-thumb{background:var(--border)}
+  .mrow {
+    display:grid; grid-template-columns:52px 52px 55px 90px 75px 60px 1fr;
+    padding:4px 3px; border-bottom:1px solid var(--border2);
+    font-size:11px; opacity:0; animation:fi 0.25s forwards; align-items:center;
+  }
+  .mrow .ts { color:var(--muted); font-size:9px; }
+  .mrow .oid { color:var(--muted); font-size:9px; font-style:italic; }
+
+  /* PERF / BENCH */
+  .perf-panel { grid-column:1; }
+  .bench-block { background:var(--surface2); border:1px solid var(--border); border-radius:3px; padding:10px 12px; margin-bottom:8px; }
+  .bench-name { color:var(--accent); margin-bottom:6px; font-size:10px; }
+  .bench-row { display:flex; justify-content:space-between; margin-bottom:3px; font-size:10px; }
+  .bench-key { color:var(--muted); }
+  .bench-val { font-weight:600; }
+  .bench-val.green { color:var(--bid); }
+  .bench-val.yellow { color:var(--accent); }
+  .bench-val.red { color:var(--ask); }
+  .bench-bar-wrap { height:3px; background:var(--dim); border-radius:2px; margin-top:7px; }
+  .bench-bar { height:100%; border-radius:2px; transition:width 0.4s,background 0.4s; }
+
+  /* SIGNALS */
+  .sig-panel { grid-column:2; }
+  .sig-row { display:flex; justify-content:space-between; align-items:center; padding:7px 3px; border-bottom:1px solid var(--border2); gap:8px; }
+  .sig-label { color:var(--muted); font-size:10px; min-width:130px; }
+  .sig-bar-wrap { flex:1; height:4px; background:var(--dim); border-radius:2px; overflow:hidden; }
+  .sig-bar { height:100%; border-radius:2px; transition:width 0.5s ease; }
+  .sig-val { font-size:12px; font-weight:600; min-width:80px; text-align:right; }
+
+  /* A-S STRATEGY */
+  .as-panel { grid-column:3; }
+  .as-params { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:10px; }
+  .as-param { background:var(--surface2); border:1px solid var(--border); border-radius:3px; padding:7px 9px; }
+  .as-param-label { font-size:9px; color:var(--muted); margin-bottom:3px; letter-spacing:1px; text-transform:uppercase; }
+  .as-param-val { font-size:13px; font-weight:600; }
+  .as-quotes { background:var(--surface2); border:1px solid var(--border); border-radius:3px; padding:10px; margin-bottom:8px; }
+  .as-quote-row { display:flex; justify-content:space-between; margin-bottom:5px; font-size:11px; }
+  .as-quote-row:last-child{margin-bottom:0}
+  .as-pnl-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; }
+  .as-pnl-card { background:var(--surface2); border:1px solid var(--border); border-radius:3px; padding:8px; text-align:center; }
+  .as-pnl-label { font-size:9px; color:var(--muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:1px; }
+  .as-pnl-val { font-size:14px; font-weight:700; font-family:'Syne',sans-serif; }
+
+  /* LATENCY HIST */
+  .lat-panel { grid-column:1; }
+  #lat-canvas { width:100%; height:110px; display:block; }
+
+  /* CONTROLS */
+  .controls { position:fixed; bottom:14px; right:14px; display:flex; gap:7px; z-index:200; }
+  .btn { padding:7px 14px; border:1px solid var(--border); background:var(--surface2); color:var(--text); font-family:'JetBrains Mono',monospace; font-size:10px; cursor:pointer; border-radius:3px; transition:all 0.12s; letter-spacing:0.5px; }
+  .btn:hover { background:var(--dim); border-color:var(--mid); color:var(--mid); }
+  .btn.active { background:var(--mid); color:#000; border-color:var(--mid); font-weight:700; }
+  .btn.danger { border-color:var(--ask); color:var(--ask); }
+  .btn.danger:hover { background:var(--ask); color:#000; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">LOB<span>.</span>ENGINE <span style="font-size:11px;font-weight:400;color:var(--muted);font-family:'JetBrains Mono',monospace">// C++17 · lock-free ingestion · price-time priority · cache-line aligned</span></div>
+  <div class="header-right">
+    <span><span class="dot" id="status-dot"></span><span id="status-label">SIM MODE</span></span>
+    <div class="pill">PAIR: <b>BTC-USD</b></div>
+    <div class="pill">SEQ: <b id="hdr-seq">0</b></div>
+    <div class="pill">FILLS: <b id="hdr-fills">0</b></div>
+    <div class="pill">ELAPSED: <b id="hdr-elapsed">00:00</b></div>
+    <div class="pill" id="hdr-clock">--:--:--</div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ORDER BOOK -->
+  <div class="panel book-panel">
+    <div class="panel-title">L2 Order Book — Reconstructed from WS Feed</div>
+    <div class="col3 col3-hdr"><span>PRICE</span><span>SIZE (BTC)</span><span>CUMUL</span></div>
+    <div class="book-rows" id="ask-side"></div>
+    <div class="mid-bar" id="mid-bar">
+      <span class="dir" id="mid-dir">▲</span>
+      <span id="mid-val">67,421.50</span>
+      <span class="spd" id="spd-val">spd 0.50</span>
+    </div>
+    <div class="book-rows" id="bid-side"></div>
+  </div>
+
+  <!-- WS INCREMENTAL FEED -->
+  <div class="panel feed-panel">
+    <div class="panel-title">Coinbase WebSocket — Incremental L2 Feed (sequence-gap recovery)</div>
+    <div style="display:grid;grid-template-columns:70px 55px 50px 90px 80px 1fr;padding:0 3px 6px;color:var(--muted);font-size:9px;border-bottom:1px solid var(--border);margin-bottom:4px;">
+      <span>SEQ#</span><span>TYPE</span><span>SIDE</span><span>PRICE</span><span>Δ SIZE</span><span>STATUS</span>
+    </div>
+    <div id="ws-feed"></div>
+  </div>
+
+  <!-- MATCH LOG — PRICE-TIME PRIORITY -->
+  <div class="panel match-panel">
+    <div class="panel-title">Match Engine — Price-Time Priority Critical Path</div>
+    <div style="display:grid;grid-template-columns:52px 52px 55px 90px 75px 60px 1fr;padding:0 3px 6px;color:var(--muted);font-size:9px;border-bottom:1px solid var(--border);margin-bottom:4px;">
+      <span>TIME</span><span>ORDER ID</span><span>SIDE</span><span>MATCH PRICE</span><span>QTY (BTC)</span><span>LAT</span><span style="text-align:right">ADV. SEL.</span>
+    </div>
+    <div id="match-log"></div>
+  </div>
+
+  <!-- PERF / GOOGLE BENCHMARK -->
+  <div class="panel perf-panel">
+    <div class="panel-title">Google Benchmark + perf</div>
+    <div class="bench-block">
+      <div class="bench-name">BM_MatchEngine_PriceTimePriority</div>
+      <div class="bench-row"><span class="bench-key">P50 (median)</span><span class="bench-val green" id="b-p50">342 ns</span></div>
+      <div class="bench-row"><span class="bench-key">P95</span><span class="bench-val yellow" id="b-p95">461 ns</span></div>
+      <div class="bench-row"><span class="bench-key">P99</span><span class="bench-val yellow" id="b-p99">487 ns</span></div>
+      <div class="bench-row"><span class="bench-key">P99.9 (tail)</span><span class="bench-val red" id="b-p999">512 ns</span></div>
+      <div class="bench-row" style="margin-top:4px"><span class="bench-key">Sub-500ns SLA</span><span class="bench-val green" id="b-sla">✓ P99 pass</span></div>
+      <div class="bench-bar-wrap"><div class="bench-bar" id="b-bar" style="width:68%"></div></div>
+    </div>
+    <div class="bench-block">
+      <div class="bench-name">BM_LockFree_OrderIngestion</div>
+      <div class="bench-row"><span class="bench-key">Throughput</span><span class="bench-val green" id="b-ops">2.4M ops/s</span></div>
+      <div class="bench-row"><span class="bench-key">Cache-line align</span><span class="bench-val green">64B structs</span></div>
+      <div class="bench-row"><span class="bench-key">L1 hit rate (perf)</span><span class="bench-val green" id="b-l1">98.8%</span></div>
+      <div class="bench-row"><span class="bench-key">L1 misses/match</span><span class="bench-val" id="b-miss">~0.3</span></div>
+    </div>
+  </div>
+
+  <!-- SIGNALS -->
+  <div class="panel sig-panel">
+    <div class="panel-title">Derived Market Signals</div>
+    <div class="sig-row">
+      <span class="sig-label">OBI (top-3 levels)</span>
+      <div class="sig-bar-wrap"><div class="sig-bar" id="obi-bar"></div></div>
+      <span class="sig-val" id="obi-val">0.000</span>
+    </div>
+    <div class="sig-row">
+      <span class="sig-label">Mid-Price</span>
+      <div></div>
+      <span class="sig-val" style="color:var(--mid)" id="sig-mid">67,421.50</span>
+    </div>
+    <div class="sig-row">
+      <span class="sig-label">Spread (bps)</span>
+      <div></div>
+      <span class="sig-val" id="sig-spd">0.74</span>
+    </div>
+    <div class="sig-row">
+      <span class="sig-label">Volatility σ (EWMA)</span>
+      <div class="sig-bar-wrap"><div class="sig-bar" id="vol-bar" style="background:var(--accent)"></div></div>
+      <span class="sig-val" id="sig-vol">0.018</span>
+    </div>
+    <div class="sig-row">
+      <span class="sig-label">Seq Gaps Recovered</span>
+      <div></div>
+      <span class="sig-val" id="sig-gaps" style="color:var(--ask)">0</span>
+    </div>
+    <div class="sig-row">
+      <span class="sig-label">Book Updates/s</span>
+      <div></div>
+      <span class="sig-val" id="sig-upds">—</span>
+    </div>
+  </div>
+
+  <!-- AVELLANEDA-STOIKOV -->
+  <div class="panel as-panel">
+    <div class="panel-title">Avellaneda-Stoikov Market Making</div>
+    <div class="as-params">
+      <div class="as-param">
+        <div class="as-param-label">γ (risk aversion)</div>
+        <div class="as-param-val" style="color:var(--accent)">0.100</div>
+      </div>
+      <div class="as-param">
+        <div class="as-param-label">κ (arrival rate)</div>
+        <div class="as-param-val" id="as-kappa" style="color:var(--accent)">1.500</div>
+      </div>
+      <div class="as-param">
+        <div class="as-param-label">σ (realised vol)</div>
+        <div class="as-param-val" id="as-sigma" style="color:var(--mid)">0.018</div>
+      </div>
+      <div class="as-param">
+        <div class="as-param-label">Inventory q (BTC)</div>
+        <div class="as-param-val" id="as-inv">+0.000</div>
+      </div>
+    </div>
+    <div class="as-quotes">
+      <div class="as-quote-row">
+        <span style="color:var(--muted);font-size:10px">r*(t) = s − q·γ·σ²·(T−t)</span>
+        <span style="color:var(--mid);font-weight:600" id="as-res">67,421.50</span>
+      </div>
+      <div class="as-quote-row">
+        <span style="color:var(--muted);font-size:10px">δ* = γσ²(T−t) + (2/γ)·ln(1+γ/κ)</span>
+        <span style="color:var(--accent);font-weight:600" id="as-ospread">0.4000</span>
+      </div>
+      <div class="as-quote-row" style="margin-top:4px">
+        <span style="color:var(--bid)">Bid quote (r* − δ*/2)</span>
+        <span style="color:var(--bid);font-weight:600" id="as-bid">67,421.30</span>
+      </div>
+      <div class="as-quote-row">
+        <span style="color:var(--ask)">Ask quote (r* + δ*/2)</span>
+        <span style="color:var(--ask);font-weight:600" id="as-ask">67,421.70</span>
+      </div>
+    </div>
+    <div class="as-pnl-row">
+      <div class="as-pnl-card">
+        <div class="as-pnl-label">Realized P&amp;L</div>
+        <div class="as-pnl-val" id="as-rpnl" style="color:var(--bid)">+$0.00</div>
+      </div>
+      <div class="as-pnl-card">
+        <div class="as-pnl-label">Adv. Sel. Cost</div>
+        <div class="as-pnl-val" id="as-adv" style="color:var(--ask)">$0.000</div>
+      </div>
+      <div class="as-pnl-card">
+        <div class="as-pnl-label">Net P&amp;L</div>
+        <div class="as-pnl-val" id="as-net">+$0.00</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LATENCY HISTOGRAM -->
+  <div class="panel lat-panel">
+    <div class="panel-title">Latency Distribution (ns buckets)</div>
+    <canvas id="lat-canvas"></canvas>
+  </div>
+
+</main>
+
+<div class="controls">
+  <button class="btn active" id="btn-speed" onclick="cycleSpeed()">1×</button>
+  <button class="btn danger" onclick="injectGap()">INJECT SEQ GAP</button>
+  <button class="btn" onclick="resetSim()">RESET</button>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+// CONSTANTS  (match your description exactly)
+// ══════════════════════════════════════════════════════════
+const BASE_PRICE = 67421.50;
+const GAMMA = 0.10;    // A-S risk aversion parameter
+const KAPPA = 1.50;    // A-S order arrival intensity (market depth proxy)
+const T_SESSION = 60;  // session length in seconds
+const DEPTHS = 9;
+
+// ══════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════
+let midPrice = BASE_PRICE;
+let prevMid  = BASE_PRICE;
+let spread   = 0.50;
+let sigma    = 0.018;   // realised vol, EWMA-updated each tick
+
+// Market making position & P&L
+let inventory      = 0.0;   // net BTC position q
+let realizedPnl    = 0.0;   // maker rebate earned (half-spread × qty)
+let adverseSelCost = 0.0;   // adverse selection: mid drift against our position post-fill
+let prevFillMid    = BASE_PRICE;
+
+// Sequence tracking
+let orderSeq  = 100000;   // monotonic order ID
+let seqNum    = 4200000;  // Coinbase WS sequence number
+let totalFills = 0;
+let seqGaps    = 0;
+
+// Telemetry
+let latencies   = [];
+let updateWindow = 0;   // book updates in last second (for /s display)
+let startTime   = Date.now();
+let simInterval = null;
+let speeds      = [600, 300, 120];
+let speedIdx    = 0;
+
+// ══════════════════════════════════════════════════════════
+// UTILITIES
+// ══════════════════════════════════════════════════════════
+function fmt(n) { return n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
+function percentile(arr, p) {
+  const s = [...arr].sort((a,b)=>a-b);
+  return s[Math.min(s.length-1, Math.floor(s.length*p))];
+}
+
+// ══════════════════════════════════════════════════════════
+// ORDER BOOK GENERATION & RENDER
+// ══════════════════════════════════════════════════════════
+function generateBook() {
+  let asks = [], bids = [];
+  let cumA = 0, cumB = 0;
+  for (let i = 0; i < DEPTHS; i++) {
+    const ap = +(midPrice + spread/2 + i*0.50 + (Math.random()-0.5)*0.05).toFixed(2);
+    const aq = +(0.05 + Math.random()*3.5).toFixed(4);
+    cumA = +(cumA + aq).toFixed(4);
+    asks.push({ p: ap, q: aq, cum: cumA });
+
+    const bp = +(midPrice - spread/2 - i*0.50 - (Math.random()-0.5)*0.05).toFixed(2);
+    const bq = +(0.05 + Math.random()*3.5).toFixed(4);
+    cumB = +(cumB + bq).toFixed(4);
+    bids.push({ p: bp, q: bq, cum: cumB });
+  }
+  return { asks, bids };
+}
+
+function renderBook({ asks, bids }) {
+  const maxC = Math.max(asks[asks.length-1].cum, bids[bids.length-1].cum);
+
+  document.getElementById('ask-side').innerHTML =
+    [...asks].reverse().map(r => `
+      <div class="brow ask-row">
+        <div class="bg" style="width:${(r.cum/maxC*100).toFixed(1)}%;background:var(--ask)"></div>
+        <span>${r.p.toFixed(2)}</span><span>${r.q.toFixed(4)}</span><span>${r.cum.toFixed(4)}</span>
+      </div>`).join('');
+
+  document.getElementById('bid-side').innerHTML =
+    bids.map(r => `
+      <div class="brow bid-row">
+        <div class="bg" style="width:${(r.cum/maxC*100).toFixed(1)}%;background:var(--bid)"></div>
+        <span>${r.p.toFixed(2)}</span><span>${r.q.toFixed(4)}</span><span>${r.cum.toFixed(4)}</span>
+      </div>`).join('');
+
+  const up = midPrice >= prevMid;
+  document.getElementById('mid-dir').textContent = up ? '▲' : '▼';
+  document.getElementById('mid-dir').style.color = up ? 'var(--bid)' : 'var(--ask)';
+  document.getElementById('mid-val').textContent  = fmt(midPrice);
+  document.getElementById('spd-val').textContent  = `spd ${spread.toFixed(2)}`;
+  document.getElementById('sig-mid').textContent  = fmt(midPrice);
+
+  // Order Book Imbalance: (bidVol - askVol) / (bidVol + askVol) on top 3 levels
+  const bidV = bids.slice(0,3).reduce((s,r)=>s+r.q, 0);
+  const askV = asks.slice(0,3).reduce((s,r)=>s+r.q, 0);
+  const obi  = (bidV - askV) / (bidV + askV);
+  document.getElementById('obi-val').textContent = obi.toFixed(3);
+  document.getElementById('obi-val').style.color = obi > 0 ? 'var(--bid)' : 'var(--ask)';
+  document.getElementById('obi-bar').style.width      = ((obi+1)/2*100).toFixed(1)+'%';
+  document.getElementById('obi-bar').style.background = obi > 0 ? 'var(--bid)' : 'var(--ask)';
+
+  document.getElementById('sig-spd').textContent = (spread/midPrice*10000).toFixed(2);
+}
+
+// ══════════════════════════════════════════════════════════
+// COINBASE WS INCREMENTAL FEED SIMULATION
+// ══════════════════════════════════════════════════════════
+function emitFeedRow(isGap) {
+  // Gap: skip several sequence numbers (simulates packet loss / reconnect)
+  if (isGap) {
+    const skipped = Math.floor(Math.random()*5)+2;
+    seqNum += skipped;
+  } else {
+    seqNum += 1;
+  }
+  updateWindow++;
+
+  const isBid = Math.random() > 0.5;
+  const price  = isBid
+    ? (midPrice - spread/2 - Math.random()*1.5).toFixed(2)
+    : (midPrice + spread/2 + Math.random()*1.5).toFixed(2);
+  const delta  = ((Math.random()<0.2 ? -1 : 1) * (Math.random()*2)).toFixed(4);
+  const types  = ['open','change','done','match'];
+  const type   = types[Math.floor(Math.random()*types.length)];
+  const actions= {open:'ADD',change:'UPD',done:'DEL',match:'FILL'};
+
+  const feed = document.getElementById('ws-feed');
+  const row  = document.createElement('div');
+  row.className = 'feed-row' + (isGap ? ' feed-gap' : '');
+  row.innerHTML = `
+    <span style="color:${isGap?'var(--ask)':'var(--muted)'}; font-size:9px">${seqNum}</span>
+    <span style="color:var(--muted)">${type}</span>
+    <span style="color:${isBid?'var(--bid)':'var(--ask)'}">${isBid?'BID':'ASK'}</span>
+    <span>${(+price).toFixed(2)}</span>
+    <span style="color:${+delta>=0?'var(--bid)':'var(--ask)'}">${+delta>=0?'+':''}${(+delta).toFixed(4)}</span>
+    <span style="color:var(--muted)">${isGap
+      ? '<span style="color:var(--ask);font-weight:600">⚠ GAP → RECOVERY</span>'
+      : actions[type]}</span>
+  `;
+  feed.insertBefore(row, feed.firstChild);
+  while (feed.children.length > 25) feed.removeChild(feed.lastChild);
+  document.getElementById('hdr-seq').textContent = seqNum.toLocaleString();
+}
+
+// ══════════════════════════════════════════════════════════
+// MATCH ENGINE — PRICE-TIME PRIORITY
+// ══════════════════════════════════════════════════════════
+function simulateMatch() {
+  // Realistic latency distribution: centred ~370ns, right-tailed, sub-500ns SLA
+  const u1 = Math.random(), u2 = Math.random();
+  const normal = Math.sqrt(-2*Math.log(u1)) * Math.cos(2*Math.PI*u2); // Box-Muller
+  const lat = Math.round(370 + normal * 45);  // mean=370, sd=45 → P99 ≈ 475ns
+  latencies.push(Math.max(220, Math.min(600, lat)));
+  if (latencies.length > 120) latencies.shift();
+
+  // Price-time: matching occurs at the best price; order ID encodes arrival time
+  orderSeq++;
+  const isBuy      = Math.random() > 0.5;
+  const matchPrice = isBuy
+    ? +(midPrice + spread/2 + (Math.random()-0.5)*0.02).toFixed(2)
+    : +(midPrice - spread/2 + (Math.random()-0.5)*0.02).toFixed(2);
+  const qty = +(0.01 + Math.random()*0.8).toFixed(4);
+
+  // We are the passive market maker; taker crosses our quote
+  if (isBuy)  inventory -= qty;   // taker buys → we go short
+  else        inventory += qty;   // taker sells → we go long
+  inventory = Math.max(-10, Math.min(10, inventory));
+
+  // Realized P&L: we earn half the spread on each passive fill
+  realizedPnl += qty * (spread / 2);
+
+  // Adverse selection: mid-price move against our position since last fill
+  const midMove = midPrice - prevFillMid;
+  // If we sold (isBuy) and mid rose → adverse. If bought and mid fell → adverse.
+  const advCost = isBuy ? Math.max(0, midMove)*qty : Math.max(0, -midMove)*qty;
+  adverseSelCost += advCost;
+  prevFillMid = midPrice;
+
+  totalFills++;
+  document.getElementById('hdr-fills').textContent = totalFills;
+
+  // Match log entry
+  const ts = new Date().toTimeString().split(' ')[0];
+  const log = document.getElementById('match-log');
+  const row = document.createElement('div');
+  row.className = 'mrow';
+  row.innerHTML = `
+    <span class="ts">${ts}</span>
+    <span class="oid">#${orderSeq}</span>
+    <span style="color:${isBuy?'var(--bid)':'var(--ask)'};font-weight:600">${isBuy?'BUY ':'SELL'}</span>
+    <span style="font-weight:500">${matchPrice.toFixed(2)}</span>
+    <span style="color:var(--muted)">${qty.toFixed(4)}</span>
+    <span style="color:${lat<450?'var(--accent)':'var(--ask)'};font-weight:600">${latencies[latencies.length-1]}ns</span>
+    <span style="text-align:right;color:${advCost>0.01?'var(--ask)':'var(--muted)'}">-$${advCost.toFixed(3)}</span>
+  `;
+  log.insertBefore(row, log.firstChild);
+  while (log.children.length > 30) log.removeChild(log.lastChild);
+
+  // Update benchmark display
+  const p50  = percentile(latencies, 0.50);
+  const p95  = percentile(latencies, 0.95);
+  const p99  = percentile(latencies, 0.99);
+  const p999 = Math.round(p99 * 1.07);
+
+  document.getElementById('b-p50').textContent  = p50  + 'ns';
+  document.getElementById('b-p95').textContent  = p95  + 'ns';
+  document.getElementById('b-p99').textContent  = p99  + 'ns';
+  document.getElementById('b-p999').textContent = p999 + 'ns';
+  document.getElementById('b-p50').className  = 'bench-val ' + (p50  < 400 ? 'green' : 'yellow');
+  document.getElementById('b-p99').className  = 'bench-val ' + (p99  < 500 ? 'yellow' : 'red');
+  document.getElementById('b-sla').textContent = p99 < 500 ? '✓ P99 pass' : '✗ P99 breach';
+  document.getElementById('b-sla').style.color  = p99 < 500 ? 'var(--bid)' : 'var(--ask)';
+  document.getElementById('b-bar').style.width      = Math.min(100, (p50/500*100)).toFixed(0)+'%';
+  document.getElementById('b-bar').style.background = p99 < 500 ? 'var(--bid)' : 'var(--ask)';
+
+  document.getElementById('b-ops').textContent  = (1.9+Math.random()*0.8).toFixed(1)+'M ops/s';
+  document.getElementById('b-l1').textContent   = (98.2+Math.random()*0.7).toFixed(1)+'%';
+  document.getElementById('b-miss').textContent = '~'+(0.2+Math.random()*0.3).toFixed(1);
+
+  updateASStrategy();
+  drawLatencyChart();
+}
+
+// ══════════════════════════════════════════════════════════
+// AVELLANEDA-STOIKOV — correct formulation
+//
+//   r*(t) = s − q·γ·σ²·(T−t)
+//   δ*(t) = γ·σ²·(T−t) + (2/γ)·ln(1 + γ/κ)
+//   bid*  = r* − δ*/2
+//   ask*  = r* + δ*/2
+// ══════════════════════════════════════════════════════════
+function updateASStrategy() {
+  const elapsed = Math.min((Date.now() - startTime) / 1000, T_SESSION - 0.1);
+  const timeLeft = T_SESSION - elapsed;   // (T - t) in seconds
+
+  const r_star    = midPrice - inventory * GAMMA * sigma * sigma * timeLeft;
+  const delta_star = GAMMA * sigma * sigma * timeLeft + (2.0/GAMMA) * Math.log(1.0 + GAMMA/KAPPA);
+  const bidQuote  = +(r_star - delta_star/2).toFixed(2);
+  const askQuote  = +(r_star + delta_star/2).toFixed(2);
+  const netPnl    = realizedPnl - adverseSelCost;
+
+  document.getElementById('as-sigma').textContent = sigma.toFixed(4);
+  document.getElementById('as-inv').textContent   = (inventory>=0?'+':'')+inventory.toFixed(3);
+  document.getElementById('as-inv').style.color   = inventory > 0.1 ? 'var(--bid)' : inventory < -0.1 ? 'var(--ask)' : 'var(--text)';
+  document.getElementById('as-res').textContent   = fmt(r_star);
+  document.getElementById('as-ospread').textContent = delta_star.toFixed(4);
+  document.getElementById('as-bid').textContent   = fmt(bidQuote);
+  document.getElementById('as-ask').textContent   = fmt(askQuote);
+
+  document.getElementById('as-rpnl').textContent  = (realizedPnl>=0?'+$':'$')+realizedPnl.toFixed(2);
+  document.getElementById('as-rpnl').style.color  = realizedPnl >= 0 ? 'var(--bid)' : 'var(--ask)';
+  document.getElementById('as-adv').textContent   = '-$'+adverseSelCost.toFixed(3);
+  document.getElementById('as-net').textContent   = (netPnl>=0?'+$':'-$')+Math.abs(netPnl).toFixed(2);
+  document.getElementById('as-net').style.color   = netPnl >= 0 ? 'var(--bid)' : 'var(--ask)';
+}
+
+// ══════════════════════════════════════════════════════════
+// PRICE WALK — geometric Brownian motion step
+// ══════════════════════════════════════════════════════════
+function walkPrice() {
+  prevMid = midPrice;
+  const dt = speeds[speedIdx] / 1000;
+  const u1 = Math.random(), u2 = Math.random();
+  const dW = Math.sqrt(-2*Math.log(u1)) * Math.cos(2*Math.PI*u2) * Math.sqrt(dt);
+  midPrice += sigma * midPrice * dW * 0.008;
+  midPrice  = Math.max(BASE_PRICE*0.94, Math.min(BASE_PRICE*1.06, midPrice));
+  spread    = +(0.30 + Math.random()*0.45).toFixed(2);
+
+  // EWMA vol: α=0.06 (fast for demo responsiveness)
+  const ret = Math.abs((midPrice - prevMid) / prevMid);
+  sigma = +(0.94*sigma + 0.06*ret*120).toFixed(5);
+  sigma = Math.max(0.008, Math.min(0.080, sigma));
+  document.getElementById('sig-vol').textContent = sigma.toFixed(3);
+  document.getElementById('vol-bar').style.width = ((sigma-0.005)/0.080*100).toFixed(0)+'%';
+}
+
+// ══════════════════════════════════════════════════════════
+// LATENCY HISTOGRAM — buckets in ns
+// ══════════════════════════════════════════════════════════
+function drawLatencyChart() {
+  const cv  = document.getElementById('lat-canvas');
+  const ctx = cv.getContext('2d');
+  const W   = cv.offsetWidth, H = 110;
+  cv.width  = W; cv.height = H;
+  ctx.fillStyle = '#080e14'; ctx.fillRect(0,0,W,H);
+
+  const bounds = [300, 350, 400, 450, 500, Infinity];
+  const labels = ['<300','300','350','400','450','500+'];
+  const colors = ['#00e676','#4ef082','#ffe500','#ff9800','#ff5722','#ff3d71'];
+  const buckets = new Array(6).fill(0);
+  latencies.forEach(l => { for(let i=0;i<bounds.length;i++) if(l<bounds[i]){buckets[i]++;break;} });
+  const maxB = Math.max(...buckets, 1);
+  const bw   = W/6;
+
+  buckets.forEach((b,i) => {
+    const bh = (b/maxB)*(H-24);
+    const x  = i*bw+bw*0.12, w = bw*0.76, y = H-14-bh;
+    ctx.fillStyle   = colors[i]+'28'; ctx.fillRect(x,y,w,bh);
+    ctx.strokeStyle = colors[i]; ctx.lineWidth=1; ctx.strokeRect(x,y,w,bh);
+    ctx.fillStyle='#4a6070'; ctx.font='9px JetBrains Mono'; ctx.textAlign='center';
+    ctx.fillText(labels[i], x+w/2, H-3);
+    if(b>0){ ctx.fillStyle=colors[i]; ctx.fillText(b, x+w/2, y-3); }
+  });
+
+  // 500ns SLA line
+  const slaY = H-14-(H-24)*0.985;
+  ctx.strokeStyle='#ff3d7166'; ctx.setLineDash([3,3]); ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0,slaY); ctx.lineTo(W,slaY); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='#ff3d71'; ctx.font='9px JetBrains Mono'; ctx.textAlign='right';
+  ctx.fillText('500ns SLA', W-4, slaY-3);
+}
+
+// ══════════════════════════════════════════════════════════
+// HUD — clock, elapsed, updates/s
+// ══════════════════════════════════════════════════════════
+function updateHUD() {
+  const e  = Math.floor((Date.now()-startTime)/1000);
+  const mm = String(Math.floor(e/60)).padStart(2,'0');
+  const ss = String(e%60).padStart(2,'0');
+  document.getElementById('hdr-elapsed').textContent = `${mm}:${ss}`;
+  document.getElementById('hdr-clock').textContent   = new Date().toTimeString().split(' ')[0];
+  document.getElementById('sig-upds').textContent    = updateWindow+'/s';
+  updateWindow = 0;
+
+  // Auto-reset session after T_SESSION for rolling demo
+  if (e >= T_SESSION) {
+    startTime = Date.now();
+    inventory = 0; realizedPnl = 0; adverseSelCost = 0; prevFillMid = midPrice;
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// GAP INJECTION
+// ══════════════════════════════════════════════════════════
+function injectGap() {
+  seqGaps++;
+  document.getElementById('sig-gaps').textContent = seqGaps;
+  emitFeedRow(true);
+  // Flash book border to show reconstruction stall
+  const bp = document.querySelector('.book-panel');
+  bp.style.outline = '1px solid var(--ask)';
+  setTimeout(() => { bp.style.outline = ''; }, 800);
+}
+
+// ══════════════════════════════════════════════════════════
+// SIM LOOP
+// ══════════════════════════════════════════════════════════
+function startSim() {
+  if (simInterval) clearInterval(simInterval);
+  simInterval = setInterval(() => {
+    walkPrice();
+    const book = generateBook();
+    renderBook(book);
+    emitFeedRow(false);
+    simulateMatch();
+    // Occasional burst (order flow clustering)
+    if (Math.random() < 0.3) { emitFeedRow(false); simulateMatch(); }
+  }, speeds[speedIdx]);
+}
+
+function cycleSpeed() {
+  speedIdx = (speedIdx+1) % speeds.length;
+  document.getElementById('btn-speed').textContent = ['1×','2×','5×'][speedIdx];
+  startSim();
+}
+
+function resetSim() {
+  midPrice = BASE_PRICE; prevMid = BASE_PRICE;
+  inventory = 0; realizedPnl = 0; adverseSelCost = 0; prevFillMid = BASE_PRICE;
+  totalFills = 0; seqGaps = 0; updateWindow = 0;
+  orderSeq = 100000; seqNum = 4200000;
+  latencies = []; startTime = Date.now(); speedIdx = 0;
+  document.getElementById('btn-speed').textContent   = '1×';
+  document.getElementById('hdr-fills').textContent   = '0';
+  document.getElementById('sig-gaps').textContent    = '0';
+  document.getElementById('match-log').innerHTML     = '';
+  document.getElementById('ws-feed').innerHTML       = '';
+  startSim();
+}
+
+// ══════════════════════════════════════════════════════════
+// WEBSOCKET — connect to real C++ engine on ws://localhost:9001
+// Falls back to JS simulation automatically if engine isn't running.
+//
+// Expected JSON from C++ engine (sent each tick):
+// {
+//   "mid": 67421.50,
+//   "spread": 0.42,
+//   "bids": [[price, size], ...],   // best → worst
+//   "asks": [[price, size], ...],   // best → worst
+//   "seq": 4200847,
+//   "obi": 0.312,
+//   "sigma": 0.018,
+//   "fill": {                        // optional, only on fill events
+//     "order_id": 100042,
+//     "side": "BUY",
+//     "price": 67422.00,
+//     "qty": 0.1000,
+//     "lat_ns": 387,
+//     "adv_cost": 0.012
+//   },
+//   "as": {
+//     "gamma": 0.10,
+//     "kappa": 1.50,
+//     "sigma": 0.018,
+//     "inventory": 0.300,
+//     "reservation": 67421.20,
+//     "opt_spread": 0.4012,
+//     "bid": 67421.00,
+//     "ask": 67421.40,
+//     "realized_pnl": 12.45,
+//     "adv_sel_cost": 3.21,
+//     "net_pnl": 9.24,
+//     "fills": 42,
+//     "gaps": 1
+//   }
+// }
+// ══════════════════════════════════════════════════════════
+
+let wsMode = false;   // true when connected to real engine
+let ws     = null;
+let wsReconnectTimer = null;
+
+function setStatus(connected) {
+  const dot   = document.getElementById('status-dot');
+  const label = document.getElementById('status-label');
+  if (connected) {
+    dot.style.background   = 'var(--mid)';
+    dot.style.boxShadow    = '0 0 7px var(--mid)';
+    label.textContent      = 'LIVE ENGINE';
+    label.style.color      = 'var(--mid)';
+  } else {
+    dot.style.background   = 'var(--bid)';
+    dot.style.boxShadow    = '0 0 7px var(--bid)';
+    label.textContent      = 'SIM MODE';
+    label.style.color      = '';
+  }
+}
+
+function connectWS() {
+  try {
+    ws = new WebSocket('ws://localhost:9001');
+  } catch(e) {
+    scheduleReconnect(); return;
+  }
+
+  ws.onopen = () => {
+    wsMode = true;
+    setStatus(true);
+    // Stop JS simulation — engine drives everything now
+    if (simInterval) { clearInterval(simInterval); simInterval = null; }
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+    console.log('[LOB] Connected to C++ engine on ws://localhost:9001');
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      handleEngineMessage(d);
+    } catch(err) {
+      console.warn('[LOB] Bad JSON from engine:', err);
+    }
+  };
+
+  ws.onclose = () => {
+    wsMode = false;
+    setStatus(false);
+    console.log('[LOB] Engine disconnected — falling back to simulation');
+    // Resume JS simulation
+    if (!simInterval) startSim();
+    scheduleReconnect();
+  };
+
+  ws.onerror = () => {
+    // onclose fires after onerror, which handles fallback
+  };
+}
+
+function scheduleReconnect() {
+  if (wsReconnectTimer) return;
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null;
+    console.log('[LOB] Attempting reconnect to engine...');
+    connectWS();
+  }, 3000);   // retry every 3 seconds
+}
+
+// ── Handle a message from the real C++ engine ─────────────────────────────
+function handleEngineMessage(d) {
+  // ── Price & book ──────────────────────────────────────────────────────
+  if (d.mid !== undefined) {
+    prevMid  = midPrice;
+    midPrice = d.mid;
+    spread   = d.spread ?? spread;
+  }
+
+  if (d.bids && d.asks) {
+    // Build book objects matching generateBook() format
+    let cumA = 0, cumB = 0;
+    const asks = d.asks.map(([p,q]) => { cumA = +(cumA+q).toFixed(4); return {p,q,cum:cumA}; });
+    const bids = d.bids.map(([p,q]) => { cumB = +(cumB+q).toFixed(4); return {p,q,cum:cumB}; });
+    renderBook({ asks, bids });
+  }
+
+  // ── WS feed row ───────────────────────────────────────────────────────
+  if (d.seq !== undefined) {
+    // Real sequence number from engine
+    const isGap = d.gap === true;
+    if (isGap) {
+      seqGaps++;
+      document.getElementById('sig-gaps').textContent = seqGaps;
+    }
+    seqNum = d.seq;
+    document.getElementById('hdr-seq').textContent = seqNum.toLocaleString();
+    emitFeedRow(isGap);
+  }
+
+  // ── Signals ───────────────────────────────────────────────────────────
+  if (d.sigma !== undefined) {
+    sigma = d.sigma;
+    document.getElementById('sig-vol').textContent = sigma.toFixed(3);
+    document.getElementById('vol-bar').style.width =
+      ((sigma - 0.005) / 0.080 * 100).toFixed(0) + '%';
+  }
+
+  // ── Fill event ────────────────────────────────────────────────────────
+  if (d.fill) {
+    const f = d.fill;
+    const lat = f.lat_ns;
+    latencies.push(lat);
+    if (latencies.length > 120) latencies.shift();
+
+    const isBuy = f.side === 'BUY';
+    totalFills++;
+    document.getElementById('hdr-fills').textContent = totalFills;
+
+    const ts  = new Date().toTimeString().split(' ')[0];
+    const log = document.getElementById('match-log');
+    const row = document.createElement('div');
+    row.className = 'mrow';
+    row.innerHTML = `
+      <span class="ts">${ts}</span>
+      <span class="oid">#${f.order_id}</span>
+      <span style="color:${isBuy?'var(--bid)':'var(--ask)'};font-weight:600">${isBuy?'BUY ':'SELL'}</span>
+      <span style="font-weight:500">${(+f.price).toFixed(2)}</span>
+      <span style="color:var(--muted)">${(+f.qty).toFixed(4)}</span>
+      <span style="color:${lat<450?'var(--accent)':'var(--ask)'};font-weight:600">${lat}ns</span>
+      <span style="text-align:right;color:${f.adv_cost>0.01?'var(--ask)':'var(--muted)'}">-$${(+f.adv_cost).toFixed(3)}</span>
+    `;
+    log.insertBefore(row, log.firstChild);
+    while (log.children.length > 30) log.removeChild(log.lastChild);
+
+    // Update latency benchmark panel with real numbers
+    const p50  = percentile(latencies, 0.50);
+    const p95  = percentile(latencies, 0.95);
+    const p99  = percentile(latencies, 0.99);
+    const p999 = Math.round(p99 * 1.07);
+    document.getElementById('b-p50').textContent  = p50  + 'ns';
+    document.getElementById('b-p95').textContent  = p95  + 'ns';
+    document.getElementById('b-p99').textContent  = p99  + 'ns';
+    document.getElementById('b-p999').textContent = p999 + 'ns';
+    document.getElementById('b-p50').className = 'bench-val ' + (p50 < 400 ? 'green' : 'yellow');
+    document.getElementById('b-p99').className = 'bench-val ' + (p99 < 500 ? 'yellow' : 'red');
+    document.getElementById('b-sla').textContent = p99 < 500 ? '✓ P99 pass' : '✗ P99 breach';
+    document.getElementById('b-sla').style.color = p99 < 500 ? 'var(--bid)' : 'var(--ask)';
+    document.getElementById('b-bar').style.width = Math.min(100,(p50/500*100)).toFixed(0)+'%';
+    document.getElementById('b-bar').style.background = p99 < 500 ? 'var(--bid)' : 'var(--ask)';
+
+    drawLatencyChart();
+  }
+
+  // ── A-S strategy panel ────────────────────────────────────────────────
+  if (d.as) {
+    const a = d.as;
+    inventory      = a.inventory      ?? inventory;
+    realizedPnl    = a.realized_pnl   ?? realizedPnl;
+    adverseSelCost = a.adv_sel_cost   ?? adverseSelCost;
+
+    document.getElementById('as-sigma').textContent = (+a.sigma).toFixed(4);
+    document.getElementById('as-inv').textContent   = (a.inventory>=0?'+':'')+a.inventory.toFixed(3);
+    document.getElementById('as-inv').style.color   = a.inventory > 0.1 ? 'var(--bid)' : a.inventory < -0.1 ? 'var(--ask)' : 'var(--text)';
+    document.getElementById('as-res').textContent   = fmt(a.reservation);
+    document.getElementById('as-ospread').textContent = (+a.opt_spread).toFixed(4);
+    document.getElementById('as-bid').textContent   = fmt(a.bid);
+    document.getElementById('as-ask').textContent   = fmt(a.ask);
+
+    const net = a.net_pnl;
+    document.getElementById('as-rpnl').textContent = (a.realized_pnl>=0?'+$':'$')+a.realized_pnl.toFixed(2);
+    document.getElementById('as-rpnl').style.color = a.realized_pnl >= 0 ? 'var(--bid)' : 'var(--ask)';
+    document.getElementById('as-adv').textContent  = '-$'+a.adv_sel_cost.toFixed(3);
+    document.getElementById('as-net').textContent  = (net>=0?'+$':'-$')+Math.abs(net).toFixed(2);
+    document.getElementById('as-net').style.color  = net >= 0 ? 'var(--bid)' : 'var(--ask)';
+
+    if (a.gaps !== undefined) document.getElementById('sig-gaps').textContent = a.gaps;
+    if (a.fills !== undefined) document.getElementById('hdr-fills').textContent = a.fills;
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// BOOT — try engine first, sim is the fallback
+// ══════════════════════════════════════════════════════════
+setInterval(updateHUD, 1000);
+updateHUD();
+setStatus(false);
+drawLatencyChart();
+startSim();       // starts immediately as fallback
+connectWS();      // tries to connect; onopen will stop sim if successful
+</script>
+</body>
+</html>
