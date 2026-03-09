@@ -172,7 +172,7 @@
 <header>
   <div class="logo">LOB<span>.</span>ENGINE <span style="font-size:11px;font-weight:400;color:var(--muted);font-family:'JetBrains Mono',monospace">// C++17 · lock-free ingestion · price-time priority · cache-line aligned</span></div>
   <div class="header-right">
-    <span><span class="dot"></span>COINBASE L2 SIM</span>
+    <span><span class="dot" id="status-dot"></span><span id="status-label">SIM MODE</span></span>
     <div class="pill">PAIR: <b>BTC-USD</b></div>
     <div class="pill">SEQ: <b id="hdr-seq">0</b></div>
     <div class="pill">FILLS: <b id="hdr-fills">0</b></div>
@@ -721,12 +721,232 @@ function resetSim() {
 }
 
 // ══════════════════════════════════════════════════════════
-// BOOT
+// WEBSOCKET — connect to real C++ engine on ws://localhost:9001
+// Falls back to JS simulation automatically if engine isn't running.
+//
+// Expected JSON from C++ engine (sent each tick):
+// {
+//   "mid": 67421.50,
+//   "spread": 0.42,
+//   "bids": [[price, size], ...],   // best → worst
+//   "asks": [[price, size], ...],   // best → worst
+//   "seq": 4200847,
+//   "obi": 0.312,
+//   "sigma": 0.018,
+//   "fill": {                        // optional, only on fill events
+//     "order_id": 100042,
+//     "side": "BUY",
+//     "price": 67422.00,
+//     "qty": 0.1000,
+//     "lat_ns": 387,
+//     "adv_cost": 0.012
+//   },
+//   "as": {
+//     "gamma": 0.10,
+//     "kappa": 1.50,
+//     "sigma": 0.018,
+//     "inventory": 0.300,
+//     "reservation": 67421.20,
+//     "opt_spread": 0.4012,
+//     "bid": 67421.00,
+//     "ask": 67421.40,
+//     "realized_pnl": 12.45,
+//     "adv_sel_cost": 3.21,
+//     "net_pnl": 9.24,
+//     "fills": 42,
+//     "gaps": 1
+//   }
+// }
+// ══════════════════════════════════════════════════════════
+
+let wsMode = false;   // true when connected to real engine
+let ws     = null;
+let wsReconnectTimer = null;
+
+function setStatus(connected) {
+  const dot   = document.getElementById('status-dot');
+  const label = document.getElementById('status-label');
+  if (connected) {
+    dot.style.background   = 'var(--mid)';
+    dot.style.boxShadow    = '0 0 7px var(--mid)';
+    label.textContent      = 'LIVE ENGINE';
+    label.style.color      = 'var(--mid)';
+  } else {
+    dot.style.background   = 'var(--bid)';
+    dot.style.boxShadow    = '0 0 7px var(--bid)';
+    label.textContent      = 'SIM MODE';
+    label.style.color      = '';
+  }
+}
+
+function connectWS() {
+  try {
+    ws = new WebSocket('ws://localhost:9001');
+  } catch(e) {
+    scheduleReconnect(); return;
+  }
+
+  ws.onopen = () => {
+    wsMode = true;
+    setStatus(true);
+    // Stop JS simulation — engine drives everything now
+    if (simInterval) { clearInterval(simInterval); simInterval = null; }
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+    console.log('[LOB] Connected to C++ engine on ws://localhost:9001');
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      handleEngineMessage(d);
+    } catch(err) {
+      console.warn('[LOB] Bad JSON from engine:', err);
+    }
+  };
+
+  ws.onclose = () => {
+    wsMode = false;
+    setStatus(false);
+    console.log('[LOB] Engine disconnected — falling back to simulation');
+    // Resume JS simulation
+    if (!simInterval) startSim();
+    scheduleReconnect();
+  };
+
+  ws.onerror = () => {
+    // onclose fires after onerror, which handles fallback
+  };
+}
+
+function scheduleReconnect() {
+  if (wsReconnectTimer) return;
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null;
+    console.log('[LOB] Attempting reconnect to engine...');
+    connectWS();
+  }, 3000);   // retry every 3 seconds
+}
+
+// ── Handle a message from the real C++ engine ─────────────────────────────
+function handleEngineMessage(d) {
+  // ── Price & book ──────────────────────────────────────────────────────
+  if (d.mid !== undefined) {
+    prevMid  = midPrice;
+    midPrice = d.mid;
+    spread   = d.spread ?? spread;
+  }
+
+  if (d.bids && d.asks) {
+    // Build book objects matching generateBook() format
+    let cumA = 0, cumB = 0;
+    const asks = d.asks.map(([p,q]) => { cumA = +(cumA+q).toFixed(4); return {p,q,cum:cumA}; });
+    const bids = d.bids.map(([p,q]) => { cumB = +(cumB+q).toFixed(4); return {p,q,cum:cumB}; });
+    renderBook({ asks, bids });
+  }
+
+  // ── WS feed row ───────────────────────────────────────────────────────
+  if (d.seq !== undefined) {
+    // Real sequence number from engine
+    const isGap = d.gap === true;
+    if (isGap) {
+      seqGaps++;
+      document.getElementById('sig-gaps').textContent = seqGaps;
+    }
+    seqNum = d.seq;
+    document.getElementById('hdr-seq').textContent = seqNum.toLocaleString();
+    emitFeedRow(isGap);
+  }
+
+  // ── Signals ───────────────────────────────────────────────────────────
+  if (d.sigma !== undefined) {
+    sigma = d.sigma;
+    document.getElementById('sig-vol').textContent = sigma.toFixed(3);
+    document.getElementById('vol-bar').style.width =
+      ((sigma - 0.005) / 0.080 * 100).toFixed(0) + '%';
+  }
+
+  // ── Fill event ────────────────────────────────────────────────────────
+  if (d.fill) {
+    const f = d.fill;
+    const lat = f.lat_ns;
+    latencies.push(lat);
+    if (latencies.length > 120) latencies.shift();
+
+    const isBuy = f.side === 'BUY';
+    totalFills++;
+    document.getElementById('hdr-fills').textContent = totalFills;
+
+    const ts  = new Date().toTimeString().split(' ')[0];
+    const log = document.getElementById('match-log');
+    const row = document.createElement('div');
+    row.className = 'mrow';
+    row.innerHTML = `
+      <span class="ts">${ts}</span>
+      <span class="oid">#${f.order_id}</span>
+      <span style="color:${isBuy?'var(--bid)':'var(--ask)'};font-weight:600">${isBuy?'BUY ':'SELL'}</span>
+      <span style="font-weight:500">${(+f.price).toFixed(2)}</span>
+      <span style="color:var(--muted)">${(+f.qty).toFixed(4)}</span>
+      <span style="color:${lat<450?'var(--accent)':'var(--ask)'};font-weight:600">${lat}ns</span>
+      <span style="text-align:right;color:${f.adv_cost>0.01?'var(--ask)':'var(--muted)'}">-$${(+f.adv_cost).toFixed(3)}</span>
+    `;
+    log.insertBefore(row, log.firstChild);
+    while (log.children.length > 30) log.removeChild(log.lastChild);
+
+    // Update latency benchmark panel with real numbers
+    const p50  = percentile(latencies, 0.50);
+    const p95  = percentile(latencies, 0.95);
+    const p99  = percentile(latencies, 0.99);
+    const p999 = Math.round(p99 * 1.07);
+    document.getElementById('b-p50').textContent  = p50  + 'ns';
+    document.getElementById('b-p95').textContent  = p95  + 'ns';
+    document.getElementById('b-p99').textContent  = p99  + 'ns';
+    document.getElementById('b-p999').textContent = p999 + 'ns';
+    document.getElementById('b-p50').className = 'bench-val ' + (p50 < 400 ? 'green' : 'yellow');
+    document.getElementById('b-p99').className = 'bench-val ' + (p99 < 500 ? 'yellow' : 'red');
+    document.getElementById('b-sla').textContent = p99 < 500 ? '✓ P99 pass' : '✗ P99 breach';
+    document.getElementById('b-sla').style.color = p99 < 500 ? 'var(--bid)' : 'var(--ask)';
+    document.getElementById('b-bar').style.width = Math.min(100,(p50/500*100)).toFixed(0)+'%';
+    document.getElementById('b-bar').style.background = p99 < 500 ? 'var(--bid)' : 'var(--ask)';
+
+    drawLatencyChart();
+  }
+
+  // ── A-S strategy panel ────────────────────────────────────────────────
+  if (d.as) {
+    const a = d.as;
+    inventory      = a.inventory      ?? inventory;
+    realizedPnl    = a.realized_pnl   ?? realizedPnl;
+    adverseSelCost = a.adv_sel_cost   ?? adverseSelCost;
+
+    document.getElementById('as-sigma').textContent = (+a.sigma).toFixed(4);
+    document.getElementById('as-inv').textContent   = (a.inventory>=0?'+':'')+a.inventory.toFixed(3);
+    document.getElementById('as-inv').style.color   = a.inventory > 0.1 ? 'var(--bid)' : a.inventory < -0.1 ? 'var(--ask)' : 'var(--text)';
+    document.getElementById('as-res').textContent   = fmt(a.reservation);
+    document.getElementById('as-ospread').textContent = (+a.opt_spread).toFixed(4);
+    document.getElementById('as-bid').textContent   = fmt(a.bid);
+    document.getElementById('as-ask').textContent   = fmt(a.ask);
+
+    const net = a.net_pnl;
+    document.getElementById('as-rpnl').textContent = (a.realized_pnl>=0?'+$':'$')+a.realized_pnl.toFixed(2);
+    document.getElementById('as-rpnl').style.color = a.realized_pnl >= 0 ? 'var(--bid)' : 'var(--ask)';
+    document.getElementById('as-adv').textContent  = '-$'+a.adv_sel_cost.toFixed(3);
+    document.getElementById('as-net').textContent  = (net>=0?'+$':'-$')+Math.abs(net).toFixed(2);
+    document.getElementById('as-net').style.color  = net >= 0 ? 'var(--bid)' : 'var(--ask)';
+
+    if (a.gaps !== undefined) document.getElementById('sig-gaps').textContent = a.gaps;
+    if (a.fills !== undefined) document.getElementById('hdr-fills').textContent = a.fills;
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// BOOT — try engine first, sim is the fallback
 // ══════════════════════════════════════════════════════════
 setInterval(updateHUD, 1000);
 updateHUD();
-startSim();
+setStatus(false);
 drawLatencyChart();
+startSim();       // starts immediately as fallback
+connectWS();      // tries to connect; onopen will stop sim if successful
 </script>
 </body>
 </html>
