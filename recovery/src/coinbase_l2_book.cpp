@@ -7,7 +7,7 @@ namespace lob {
 CoinbaseL2Book::CoinbaseL2Book(GapCallback on_gap, UpdateCallback on_update)
     : on_gap_(std::move(on_gap)), on_update_(std::move(on_update)) {}
 
-// ── Snapshot ───────────────────────────────────────────────────────────────
+
 void CoinbaseL2Book::apply_snapshot(
     SeqNum seq, const std::vector<std::pair<double, double>> &bids,
     const std::vector<std::pair<double, double>> &asks) {
@@ -26,7 +26,7 @@ void CoinbaseL2Book::apply_snapshot(
   initialised_ = true;
 }
 
-// ── Incremental update ─────────────────────────────────────────────────────
+// ── Incremental
 bool CoinbaseL2Book::apply_update(const L2Update &upd) {
   if (!initialised_)
     return false;
@@ -67,7 +67,7 @@ void CoinbaseL2Book::apply_side_update(const L2Update &upd) {
   }
 }
 
-// ── Book signals ───────────────────────────────────────────────────────────
+// ── Book signals 
 double CoinbaseL2Book::best_bid() const {
   return bids_.empty() ? 0.0 : from_price(bids_.begin()->first);
 }
@@ -108,7 +108,7 @@ double CoinbaseL2Book::order_book_imbalance(int levels) const {
   return static_cast<double>(bv - av) / static_cast<double>(total);
 }
 
-// ── Debug print ────────────────────────────────────────────────────────────
+// print
 void CoinbaseL2Book::print(int levels) const {
   std::cout << "\n=== Coinbase L2 Book (seq " << expected_seq_ << ") ===\n";
   std::cout << std::fixed << std::setprecision(2);
